@@ -27,22 +27,36 @@ export function cleanYouTubeUrl(url) {
 /**
  * Fetch video metadata quickly using yt-dlp --dump-single-json
  */
-function getBaseArgs() {
+function getBaseArgs(customCookiePath = null) {
 	const args = [
 		'--no-playlist',
 		'--no-warnings',
 		'--js-runtimes', 'node'
 	];
-	if (config.COOKIES_PATH && fs.existsSync(config.COOKIES_PATH)) {
-		args.push('--cookies', config.COOKIES_PATH);
+	const cookieFile = customCookiePath || config.COOKIES_PATH;
+	if (cookieFile && fs.existsSync(cookieFile)) {
+		args.push('--cookies', cookieFile);
 	}
 	return args;
+}
+
+function createJobCookieCopy(jobDir) {
+	if (config.COOKIES_PATH && fs.existsSync(config.COOKIES_PATH)) {
+		try {
+			const dest = path.join(jobDir, 'session_cookies.txt');
+			fs.copyFileSync(config.COOKIES_PATH, dest);
+			return dest;
+		} catch (err) {
+			console.warn('[Morrow] Could not create cookie copy:', err.message);
+		}
+	}
+	return null;
 }
 
 function sanitizeErrorMessage(errMsg, exitCode) {
 	if (!errMsg) return `Process exited with code ${exitCode}`;
 	if (errMsg.includes('Sign in to confirm') || errMsg.includes('not a bot')) {
-		return "YouTube blocked this request (bot detection). Add cookies.txt to server to bypass.";
+		return "YouTube blocked this request (bot detection). Add valid cookies.txt to server to bypass.";
 	}
 	if (errMsg.includes('Video unavailable') || errMsg.includes('Private video')) {
 		return 'Video is unavailable, private, or deleted.';
@@ -151,8 +165,10 @@ export function executeDownload(job, { onProgress, onStatusChange }) {
 		const jobDir = path.join(config.STORAGE_DIR, job.id);
 		fs.mkdirSync(jobDir, { recursive: true });
 
+		const jobCookie = createJobCookieCopy(jobDir);
+
 		const args = [
-			...getBaseArgs(),
+			...getBaseArgs(jobCookie),
 			'--newline',
 			'--progress-template', 'download:%(progress._percent_str)s|%(progress._speed_str)s|%(progress._eta_str)s',
 			'-o', path.join(jobDir, '%(title).100s [%(id)s].%(ext)s')
